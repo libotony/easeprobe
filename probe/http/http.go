@@ -43,6 +43,7 @@ import (
 type HTTP struct {
 	base.DefaultProbe `yaml:",inline"`
 	URL               string            `yaml:"url" json:"url" jsonschema:"format=uri,title=HTTP URL,description=HTTP URL to probe"`
+	SkipDNS           string            `yaml:"skip_dns" json:"skip-dns" jsonschema:"format=ip,title=Designated IP,description=skip DNS resolve, use designated ip"`
 	Proxy             string            `yaml:"proxy" json:"proxy,omitempty" jsonschema:"format=url,title=Proxy Server,description=proxy to use for HTTP requests"`
 	ContentEncoding   string            `yaml:"content_encoding,omitempty" json:"content_encoding,omitempty" jsonschema:"title=Content Encoding,description=content encoding to use for HTTP requests"`
 	Method            string            `yaml:"method,omitempty" json:"method,omitempty" jsonschema:"enum=GET,enum=POST,enum=DELETE,enum=PUT,enum=HEAD,enum=OPTIONS,enum=PATCH,enum=TRACE,enum=CONNECT,title=HTTP Method,description=HTTP method to use for HTTP requests"`
@@ -95,6 +96,10 @@ func (h *HTTP) Config(gConf global.ProbeSettings) error {
 		return err
 	}
 
+	if len(h.SkipDNS) > 0 && net.ParseIP(h.SkipDNS) == nil {
+		return fmt.Errorf("%s is not an invalid IP address", h.SkipDNS)
+	}
+
 	tls, err := h.TLS.Config()
 	if err != nil {
 		log.Errorf("[%s / %s] TLS configuration error - %s", h.ProbeKind, h.ProbeName, err)
@@ -110,6 +115,9 @@ func (h *HTTP) Config(gConf global.ProbeSettings) error {
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			d := net.Dialer{Timeout: h.Timeout()}
+			if len(h.SkipDNS) > 0 {
+				addr = h.SkipDNS + addr[strings.LastIndex(addr, ":"):]
+			}
 			conn, err := d.DialContext(ctx, network, addr)
 			if err != nil {
 				return nil, err

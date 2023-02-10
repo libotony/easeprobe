@@ -39,6 +39,7 @@ import (
 type TLS struct {
 	base.DefaultProbe  `yaml:",inline"`
 	Host               string `yaml:"host" json:"host" jsonschema:"required,format=hostname,title=Host,description=The host to probe"`
+	SkipDNS            string `yaml:"skip_dns" json:"skip-dns" jsonschema:"format=ip,title=Designated IP,description=skip DNS resolve, use designated ip"`
 	Proxy              string `yaml:"proxy" json:"proxy,omitempty" jsonschema:"format=hostname,title=Proxy,description=The proxy to use for the TLS connection"`
 	InsecureSkipVerify bool   `yaml:"insecure_skip_verify" json:"insecure_skip_verify,omitempty" jsonschema:"title=Insecure Skip Verify,description=Whether to skip verifying the certificate chain and host name"`
 
@@ -76,6 +77,10 @@ func (t *TLS) Config(gConf global.ProbeSettings) error {
 		}
 	}
 
+	if len(t.SkipDNS) > 0 && net.ParseIP(t.SkipDNS) == nil {
+		return fmt.Errorf("%s is not an invalid IP address", t.SkipDNS)
+	}
+
 	t.metrics = newMetrics(kind, tag)
 
 	log.Debugf("[%s / %s] configuration: %+v", t.ProbeKind, t.ProbeName, *t)
@@ -84,7 +89,16 @@ func (t *TLS) Config(gConf global.ProbeSettings) error {
 
 // DoProbe return the checking result
 func (t *TLS) DoProbe() (bool, string) {
+	colonPos := strings.LastIndex(t.Host, ":")
+	if colonPos == -1 {
+		colonPos = len(t.Host)
+	}
+	hostname := t.Host[:colonPos]
+
 	addr := t.Host
+	if len(t.SkipDNS) > 0 {
+		addr = t.SkipDNS + t.Host[colonPos:]
+	}
 	conn, err := t.GetProxyConnection(t.Proxy, addr)
 	if err != nil {
 		log.Errorf("[%s / %s] tcp dial error: %v", t.ProbeKind, t.ProbeName, err)
@@ -94,12 +108,6 @@ func (t *TLS) DoProbe() (bool, string) {
 		tcpConn.SetLinger(0)
 	}
 	defer conn.Close()
-
-	colonPos := strings.LastIndex(addr, ":")
-	if colonPos == -1 {
-		colonPos = len(addr)
-	}
-	hostname := addr[:colonPos]
 
 	tconn := tls.Client(conn, &tls.Config{
 		InsecureSkipVerify: t.InsecureSkipVerify,
